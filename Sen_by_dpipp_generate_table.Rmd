@@ -1,0 +1,203 @@
+---
+title: "COVID Ag-RDT sensitivities by DPIPP"
+author: 
+  - Honghuang Lin, PhD and Biqi Wang, PhD
+  - Lead Biostatisticians, Test Us at Home Study
+  - Lin Lab, Program in Digital Medicine, UMass Chan Medical School
+date: "2022-08-12"
+output: html_document
+---
+
+```{r}
+## Load R packages
+library(Hmisc)
+library(scales)
+library(knitr)
+```
+
+#### Script to generate the sensivities of Ag-RDT
+```{r}
+## Read the whole data
+input=read.table("Data2share.txt",sep="\t",header=T)
+
+## Select eligible individuals for analysis
+mydata=subset(input,eligible==1)
+
+## Create the PCR results, Antigen results, and Symptoms results by days post index PCR positive 
+
+mydata$pcr_positive_in_all_exam_count=0
+for(i in 1:nrow(mydata)){
+  index_exam=0
+  for(k in 1:12){
+    if(!is.na(mydata[i,paste0("comparator.",k)])){
+      mydata$pcr_positive_in_all_exam_count[i]=mydata$pcr_positive_in_all_exam_count[i]+mydata[i,paste0("comparator.",k)]
+    }
+    if(index_exam==0 & !is.na(mydata[i,paste0("comparator.",k)]) & mydata[i,paste0("comparator.",k)]==1){
+      index_exam=k
+      for(kk in k:12){
+        for(DPPP in c(0,2,4,6,8,10,12)){
+          if(!is.na(mydata[i,paste0("testday.",kk)])){
+            if(mydata[i,paste0("testday.",kk)]-mydata[i,paste0("testday.",index_exam)]==DPPP){
+              mydata[i,paste0("after_first_pcr_positive.pcr_",DPPP)]=mydata[i,paste0("comparator.",kk)]
+              mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]=mydata[i,paste0("antigen_result.",kk)]
+              mydata[i,paste0("after_first_pcr_positive.symptom_",DPPP)]=mydata[i,paste0("symptom.",kk)]
+
+            }
+          }
+        }
+      }
+    }
+  }
+}
+mydata$after_first_pcr_positive.otc_14=0
+
+### Derive Singleton PCR+ variable 
+mydata$singleton=with(mydata,ifelse(pcr_positive_in_all_exam_count==1 & after_first_pcr_positive.pcr_2==0,1,0))
+
+
+## Analysis will be conducted by including and excluding singleton PCR+, and by symptomatic or not
+
+sen_table<-function(mydata,sympomatic_or_asympomatic=1){
+  result=NULL
+for(DPPP in c(0,2,4,6,8,10)){
+  oneday_pcr=0;twoday_pcr=0;threeday_pcr=0
+  oneday_otc=0;twoday_otc=0;threeday_otc=0
+  for(i in 1:nrow(mydata)){
+    if(!is.na(mydata[i,paste0("after_first_pcr_positive.pcr_",DPPP)]) & mydata[i,paste0("after_first_pcr_positive.pcr_",DPPP)]==1 
+       & mydata[i,paste0("after_first_pcr_positive.symptom_",DPPP)]==sympomatic_or_asympomatic ## To include symptomatic or not
+    ){  
+      
+      ## 1x test
+      if(!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)])){ ## Remove those with missing antigen tests
+        oneday_pcr=oneday_pcr+1; 
+        if(!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]) & mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]==1){
+          oneday_otc=oneday_otc+1; 
+        }
+      }
+      
+      ## 2x test
+      if(!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]) & !is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+2)])){ ## Remove those with missing antigen tests
+        twoday_pcr=twoday_pcr+1
+        if((!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]) & mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]==1) |
+           (!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+2)]) & mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+2)]==1)){
+          twoday_otc=twoday_otc+1
+        }
+      }
+      
+      
+      ## 3x test
+      if(!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]) & !is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+2)])  & ( !is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+4)]))){ ## Remove those with missing antigen tests
+        threeday_pcr=threeday_pcr+1
+        if((!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]) & mydata[i,paste0("after_first_pcr_positive.otc_",DPPP)]==1) |
+           (!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+2)]) & mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+2)]==1) |
+           (!is.na(mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+4)]) & mydata[i,paste0("after_first_pcr_positive.otc_",DPPP+4)]==1) ){
+          threeday_otc=threeday_otc+1
+        }
+      }
+    }
+  }
+  
+  CI=binconf(oneday_otc,oneday_pcr)
+  temp=c(paste0(oneday_otc,"/",oneday_pcr," ",percent(CI[1],accuracy = 0.1)," (",percent(CI[2],accuracy = 0.1),",",percent(CI[3],accuracy = 0.1),")"))
+  
+  CI=binconf(twoday_otc,twoday_pcr)
+  temp=c(temp,paste0(twoday_otc,"/",twoday_pcr," ",percent(CI[1],accuracy = 0.1)," (",percent(CI[2],accuracy = 0.1),",",percent(CI[3],accuracy = 0.1),")"))
+  
+  CI=binconf(threeday_otc,threeday_pcr)
+  temp=c(temp,paste0(threeday_otc,"/",threeday_pcr," ",percent(CI[1],accuracy = 0.1)," (",percent(CI[2],accuracy = 0.1),",",percent(CI[3],accuracy = 0.1),")"))
+  
+  if(DPPP==10){
+    temp[3]=NA
+  }
+  result=rbind(result,c(DPPP,temp))
+
+}
+result=data.frame(result)
+names(result)=c("Time","1x test", "2x test", "3x test")
+ return(result)
+}
+
+### All patients by symptoms 
+res1<-sen_table(mydata = mydata,sympomatic_or_asympomatic = 1)
+
+res2<-sen_table(mydata = mydata,sympomatic_or_asympomatic = 0)
+
+### Patients excluding singleton PCR+
+mydata_ex=subset(mydata,is.na(singleton) | singleton==0) 
+
+res1_ex<-sen_table(mydata = mydata_ex,sympomatic_or_asympomatic = 1)
+  
+res2_ex<-sen_table(mydata = mydata_ex,sympomatic_or_asympomatic = 0)
+
+### For cumulative numbers
+### Noted: this is not as individual, but as number of testing measures of all PCR or antigen tests
+
+cum_table<-function(res_data){
+  test<-c()
+  test2<-c()
+for (k in 2:4){
+
+  ## cumulative DPPP 0-6
+  otc_counts<-0
+pcr_counts<-0
+for (i in 1:4){
+      otc_c<-as.numeric(unlist(strsplit(res_data[i,k], "/"))[1])
+  otc_counts<-otc_counts+otc_c
+  
+  pcr_c<-as.numeric(unlist(strsplit(unlist(strsplit(res_data[i,k], "/"))[2]," "))[1])
+  pcr_counts<-pcr_counts+pcr_c
+    
+  CI=binconf(otc_counts,pcr_counts)
+  temp=c(paste0(otc_counts,"/",pcr_counts," ",percent(CI[1],accuracy = 0.1)," (",percent(CI[2],accuracy = 0.1),",",percent(CI[3],accuracy = 0.1),")"))
+}
+
+### cumulative of DPPP 8-10
+  otc_counts<-0
+  pcr_counts<-0
+  
+for (i in 5:6){
+      otc_c<-as.numeric(unlist(strsplit(res_data[i,k], "/"))[1])
+  if(is.na(otc_c)){otc_c<-0}else{otc_c}
+      otc_counts<-otc_counts+otc_c
+  
+  pcr_c<-as.numeric(unlist(strsplit(unlist(strsplit(res_data[i,k], "/"))[2]," "))[1])
+  if(is.na(pcr_c)){pcr_c<-0}else{pcr_c}
+  pcr_counts<-pcr_counts+pcr_c
+    
+  CI=binconf(otc_counts,pcr_counts)
+  temp2=c(paste0(otc_counts,"/",pcr_counts," ",percent(CI[1],accuracy = 0.1)," (",percent(CI[2],accuracy = 0.1),",",percent(CI[3],accuracy = 0.1),")"))
+}
+    test<-c(test,temp)
+    test2<-c(test2,temp2)
+ }
+ resall<-rbind(test,test2)
+ Time<-c("DPIPP 0-6","DPIPP 8-10")
+ resall<-data.frame(Time,resall)
+ colnames(resall)<-c("Time","1x test", "2x test", "3x test")
+ rownames(resall)<-c()
+ 
+ return(resall)
+}
+
+### Add the additional results of cumulative stats
+res1_ad<-cum_table(res_data = res1)
+
+res2_ad<-cum_table(res_data = res2)
+
+res1_ex_ad<-cum_table(res_data = res1_ex)
+
+res2_ex_ad<-cum_table(res_data = res2_ex)
+
+```
+
+#### Print out the result tables
+```{r}
+kable(rbind(res1,res1_ad),caption = "Sensitivity of Ag-RDT in Symptomatic (All participants)")
+
+kable(rbind(res2,res2_ad),caption = "Sensitivity of Ag-RDT in Asymptomatic (All participants)")
+
+kable(rbind(res1_ex,res1_ex_ad),caption = "Sensitivity of Ag-RDT in Symptomatic (Excludes Singleton PCR+)")
+
+kable(rbind(res2_ex,res2_ex_ad),caption = "Sensitivity of Ag-RDT in Asymptomatic (Excludes Singleton PCR+)")
+
+```
